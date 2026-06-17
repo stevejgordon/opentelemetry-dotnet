@@ -14,6 +14,12 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 internal static class ProviderBuilderServiceCollectionExtensions
 {
+    // Full IConfiguration key for the ratio value projected by DeclarativeConfigurationConverter (Flow 1).
+    // DeclarativeConfigurationConverter.DeclarativeSamplerArgKey must equal this value.
+    // Read directly from the root IConfiguration rather than a subsection so there is one canonical
+    // path and no implicit dependency on the options name used by the caller.
+    internal const string DeclarativeSamplerArgKey = "declarative:traces:sampler:arg";
+
     public static IServiceCollection AddOpenTelemetryLoggerProviderBuilderServices(this IServiceCollection services)
     {
         Debug.Assert(services != null, "services was null");
@@ -54,7 +60,41 @@ internal static class ProviderBuilderServiceCollectionExtensions
         services.RegisterOptionsFactory(
             (sp, configuration, name) => new ActivityExportProcessorOptions(
                 sp.GetRequiredService<IOptionsMonitor<BatchExportActivityProcessorOptions>>().Get(name)));
+        services.RegisterOptionsFactory(
+            (sp, configuration, name) =>
+            {
+                if (name.StartsWith("declarative:", StringComparison.Ordinal))
+                {
+                    // Read directly from root IConfiguration using the full projected key.
+                    // The key is emitted by DeclarativeConfigurationConverter (Flow 1).
+                    var argRaw = configuration[DeclarativeSamplerArgKey];
+                    return new SamplerOptions
+                    {
+                        SamplerArgumentRaw = argRaw,
+                        SamplerArgument = SamplerOptions.TryParseRatio(argRaw),
+                    };
+                }
+
+                // Default: read from OTEL_TRACES_SAMPLER / OTEL_TRACES_SAMPLER_ARG.
+                var envArgRaw = configuration[TracerProviderSdk.TracesSamplerArgConfigKey];
+                return new SamplerOptions
+                {
+                    SamplerType = configuration[TracerProviderSdk.TracesSamplerConfigKey],
+                    SamplerArgumentRaw = envArgRaw,
+                    SamplerArgument = SamplerOptions.TryParseRatio(envArgRaw),
+                };
+            });
 #pragma warning restore CS8604 // Possible null reference argument.
+
+        // PluginComponentProviderRegistry is constructed once from all IPluginComponentProvider singletons.
+        // TryAdd... methods ensure a single instance is registered, even when this method is called more than once
+        // (e.g. Sdk.CreateTracerProviderBuilder() vs. services.AddOpenTelemetry().WithTracing()).
+        // TryAddEnumerable prevents duplicate built-in plugin provider entries when the method is re-entered.
+        services.TryAddSingleton<PluginComponentProviderRegistry>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IPluginComponentProvider, AlwaysOnSamplerFactory>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IPluginComponentProvider, AlwaysOffSamplerFactory>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IPluginComponentProvider, TraceIdRatioBasedSamplerFactory>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IPluginComponentProvider, ParentBasedSamplerFactory>());
 
         return services;
     }

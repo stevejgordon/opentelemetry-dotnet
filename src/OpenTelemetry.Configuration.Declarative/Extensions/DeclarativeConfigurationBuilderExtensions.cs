@@ -65,23 +65,44 @@ internal
         return builder.AddOpenTelemetryDeclarativeConfiguration(new FilePath(filePath));
     }
 
-    // Internal overload so the path is never round-tripped through a string and re-resolved
-    // by Path.GetFullPath. The FilePath struct stores the absolute path at construction time,
-    // so callers that already hold a FilePath (e.g. overlay registration) can pass it directly.
+    // Internal overload for standalone IConfigurationBuilder use (no DI wiring).
+    // Creates a local DeclarativeConfigurationModelCache that is not registered in any
+    // service collection — the component builder path is not active in this scenario.
     internal static IConfigurationBuilder AddOpenTelemetryDeclarativeConfiguration(
         this IConfigurationBuilder builder,
         FilePath path)
     {
         Guard.ThrowIfNull(builder);
 
-        if (builder.Sources.OfType<DeclarativeConfigurationSource>().Any(s => s.FilePath == path))
+        if (builder.Sources.OfType<DeclarativeConfigurationSource>().Any(s => s.Cache.FilePath == path))
         {
             OpenTelemetryDeclarativeConfigurationEventSource.Log.SourceAlreadyRegisteredInBuilder(path.DisplayPath);
             return builder;
         }
 
-        builder.Sources.Add(new DeclarativeConfigurationSource(path));
+        var cache = new DeclarativeConfigurationModelCache(path);
+        builder.Sources.Add(new DeclarativeConfigurationSource(cache));
         OpenTelemetryDeclarativeConfigurationEventSource.Log.SourceRegistered(path.DisplayPath);
+        return builder;
+    }
+
+    // Internal overload for the DI-wired path (UseDeclarativeConfiguration).
+    // The caller pre-creates the cache and registers it as a singleton in DI so that
+    // DeclarativeComponentBuilder can resolve it to build SDK components from the typed model.
+    internal static IConfigurationBuilder AddOpenTelemetryDeclarativeConfiguration(
+        this IConfigurationBuilder builder,
+        DeclarativeConfigurationModelCache cache)
+    {
+        Guard.ThrowIfNull(builder);
+
+        if (builder.Sources.OfType<DeclarativeConfigurationSource>().Any(s => s.Cache.FilePath == cache.FilePath))
+        {
+            OpenTelemetryDeclarativeConfigurationEventSource.Log.SourceAlreadyRegisteredInBuilder(cache.FilePath.DisplayPath);
+            return builder;
+        }
+
+        builder.Sources.Add(new DeclarativeConfigurationSource(cache));
+        OpenTelemetryDeclarativeConfigurationEventSource.Log.SourceRegistered(cache.FilePath.DisplayPath);
         return builder;
     }
 }

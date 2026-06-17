@@ -11,7 +11,7 @@ public sealed class DeclarativeConfigurationProviderTests
     public void Load_MissingFile_ThrowsDeclarativeConfigurationException()
     {
         using var yamlFile = new DeclarativeYamlTestFileFactory();
-        var provider = new DeclarativeConfigurationProvider(new FilePath(Path.Combine(yamlFile.TempDirectory, "nonexistent.yaml")));
+        var provider = ForFile(Path.Combine(yamlFile.TempDirectory, "nonexistent.yaml"));
 
         var ex = Assert.Throws<DeclarativeConfigurationException>(() => provider.Load());
         Assert.IsType<FileNotFoundException>(ex.InnerException);
@@ -24,7 +24,7 @@ public sealed class DeclarativeConfigurationProviderTests
             disabled: true,
             resourceAttributes: new Dictionary<string, string> { ["service.name"] = "my-service" });
 
-        var provider = new DeclarativeConfigurationProvider(new FilePath(yamlFile.Path));
+        var provider = ForFile(yamlFile.Path);
         provider.Load();
 
         Assert.True(provider.TryGet(OtelEnvironmentVariables.SdkDisabled, out var disabled));
@@ -38,7 +38,7 @@ public sealed class DeclarativeConfigurationProviderTests
     public void Load_EmptyFile_LeavesDataEmpty()
     {
         using var yamlFile = DeclarativeYamlTestFile.CreateYamlFile(string.Empty);
-        var provider = new DeclarativeConfigurationProvider(new FilePath(yamlFile.Path));
+        var provider = ForFile(yamlFile.Path);
         provider.Load();
 
         Assert.False(provider.TryGet(OtelEnvironmentVariables.SdkDisabled, out _));
@@ -53,7 +53,7 @@ public sealed class DeclarativeConfigurationProviderTests
             file_format: "1.0"
             """;
 
-        var provider = new DeclarativeConfigurationProvider(new FilePath(yamlFile.Path));
+        var provider = ForFile(yamlFile.Path);
         provider.Load();
         Assert.True(provider.TryGet(OtelEnvironmentVariables.SdkDisabled, out _));
 
@@ -67,7 +67,7 @@ public sealed class DeclarativeConfigurationProviderTests
     public void Load_InvalidFileFormat_ThrowsDeclarativeConfigurationException()
     {
         using var yamlFile = DeclarativeYamlTestFile.CreateDeclarativeYaml(fileFormat: "99.0");
-        var provider = new DeclarativeConfigurationProvider(new FilePath(yamlFile.Path));
+        var provider = ForFile(yamlFile.Path);
 
         Assert.Throws<DeclarativeConfigurationException>(() => provider.Load());
     }
@@ -84,7 +84,7 @@ public sealed class DeclarativeConfigurationProviderTests
             """;
 
         using var yamlFile = DeclarativeYamlTestFile.CreateYamlFile(yaml);
-        var provider = new DeclarativeConfigurationProvider(new FilePath(yamlFile.Path));
+        var provider = ForFile(yamlFile.Path);
         provider.Load();
 
         Assert.True(provider.TryGet(OtelEnvironmentVariables.ResourceAttributes, out var attrs));
@@ -103,7 +103,7 @@ public sealed class DeclarativeConfigurationProviderTests
             """;
 
         using var yamlFile = DeclarativeYamlTestFile.CreateYamlFile(yaml);
-        var provider = new DeclarativeConfigurationProvider(new FilePath(yamlFile.Path));
+        var provider = ForFile(yamlFile.Path);
 
         Assert.Throws<DeclarativeConfigurationException>(() => provider.Load());
     }
@@ -116,7 +116,7 @@ public sealed class DeclarativeConfigurationProviderTests
             """;
 
         using var yamlFile = DeclarativeYamlTestFile.CreateYamlFile(yaml);
-        var provider = new DeclarativeConfigurationProvider(new FilePath(yamlFile.Path));
+        var provider = ForFile(yamlFile.Path);
 
         Assert.Throws<DeclarativeConfigurationException>(() => provider.Load());
     }
@@ -127,10 +127,13 @@ public sealed class DeclarativeConfigurationProviderTests
         const string yaml = "{ unclosed: [bracket";
 
         using var yamlFile = DeclarativeYamlTestFile.CreateYamlFile(yaml);
-        var provider = new DeclarativeConfigurationProvider(new FilePath(yamlFile.Path));
+        var provider = ForFile(yamlFile.Path);
 
         var ex = Assert.Throws<DeclarativeConfigurationException>(() => provider.Load());
         Assert.NotNull(ex.InnerException);
         Assert.IsType<YamlDotNet.Core.YamlException>(ex.InnerException, exactMatch: false);
     }
+
+    private static DeclarativeConfigurationProvider ForFile(string path) =>
+        new(new DeclarativeConfigurationModelCache(new FilePath(path)));
 }

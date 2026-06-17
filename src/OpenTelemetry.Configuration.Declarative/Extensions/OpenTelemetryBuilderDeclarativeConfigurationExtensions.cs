@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using OpenTelemetry.Configuration.Declarative;
 using OpenTelemetry.Internal;
+using OpenTelemetry.Trace;
 
 namespace OpenTelemetry;
 
@@ -89,7 +90,18 @@ internal
             return;
         }
 
+        // The cache is the shared parse result: the IConfiguration provider populates it during Load()
+        // and the component builder reads from it when building SDK providers.
+        var cache = new DeclarativeConfigurationModelCache(filePath);
+
         services.AddSingleton(new DeclarativeConfigurationOverlayMarker(filePath));
+        services.AddSingleton(cache);
+
+        // Wire the declarative component builder into the tracer provider build pipeline.
+        // The callback runs when TracerProvider is first resolved from DI.
+        services.ConfigureOpenTelemetryTracerProvider(
+            (sp, builder) => DeclarativeComponentBuilder.Configure(sp, builder));
+
         OpenTelemetryDeclarativeConfigurationEventSource.Log.OverlayRegistrationStarted(filePath.DisplayPath);
 
         // TODO(strict-mode): branch here on a future DeclarativeConfigurationMode (Default vs Strict). See https://github.com/open-telemetry/opentelemetry-dotnet/issues/6380.
@@ -100,7 +112,7 @@ internal
         if (descriptor?.ImplementationInstance is IConfigurationBuilder liveBuilder)
         {
             // ConfigurationManager registered as instance: mutate in-place, preserve reload.
-            liveBuilder.AddOpenTelemetryDeclarativeConfiguration(filePath);
+            liveBuilder.AddOpenTelemetryDeclarativeConfiguration(cache);
             return;
         }
 
@@ -135,7 +147,7 @@ internal
                 if (existing is IConfigurationBuilder existingAsBuilder)
                 {
                     // Resolved config is a live builder (HostApplicationBuilder): insert in-place.
-                    existingAsBuilder.AddOpenTelemetryDeclarativeConfiguration(filePath);
+                    existingAsBuilder.AddOpenTelemetryDeclarativeConfiguration(cache);
                     return existing;
                 }
 
@@ -160,7 +172,7 @@ internal
                 }
                 else
                 {
-                    manager.AddOpenTelemetryDeclarativeConfiguration(filePath);
+                    manager.AddOpenTelemetryDeclarativeConfiguration(cache);
                 }
 
                 return manager;

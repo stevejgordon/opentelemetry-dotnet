@@ -45,6 +45,12 @@ Description: Declarative configuration
 
 Details: [OTEL1006](./OTEL1006.md)
 
+### OTEL1007
+
+Description: Declarative configuration component factory engine
+
+Details: [OTEL1007](./OTEL1007.md)
+
 ## Inactive
 
 Experimental APIs which have been released stable or removed:

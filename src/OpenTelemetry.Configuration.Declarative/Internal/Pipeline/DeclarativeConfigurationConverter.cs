@@ -1,6 +1,8 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#pragma warning disable OTEL1007 // IDeclarativeConfigProperties is experimental; used internally
+
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -23,6 +25,12 @@ internal static partial class DeclarativeConfigurationConverter
 {
     internal const string DisabledKey = OtelEnvironmentVariables.SdkDisabled;
     internal const string ResourceAttributesKey = OtelEnvironmentVariables.ResourceAttributes;
+
+    // IConfiguration key for the projected trace_id_ratio_based ratio (Flow 1).
+    // Defined in ProviderBuilderServiceCollectionExtensions (core); aliased here so the converter
+    // does not embed a duplicate string literal that could silently drift out of sync.
+    internal const string DeclarativeSamplerArgKey =
+        Microsoft.Extensions.DependencyInjection.ProviderBuilderServiceCollectionExtensions.DeclarativeSamplerArgKey;
 
     // Per OTel attribute naming spec: starts with a letter or underscore,
     // followed by letters, digits, underscores, hyphens, or dots.
@@ -61,15 +69,11 @@ internal static partial class DeclarativeConfigurationConverter
         matchTimeout: TimeSpan.FromSeconds(1));
 #endif
 
-    /// <summary>
-    /// Converts <paramref name="config"/> into <paramref name="data"/> as flat OTel configuration keys.
-    /// </summary>
-    /// <param name="config">The typed configuration model to convert.</param>
-    /// <param name="data">Dictionary to populate with flat key/value pairs.</param>
     internal static void Convert(DeclarativeConfiguration config, IDictionary<string, string?> data)
     {
         EmitDisabled(config.Disabled, data);
         EmitResource(config.Resource, data);
+        EmitTracerProviderFlowOne(config.TracerProvider, data);
     }
 
     // disabled -> OTEL_SDK_DISABLED. Present emits canonical true/false; null/absent emit nothing.
@@ -225,6 +229,61 @@ internal static partial class DeclarativeConfigurationConverter
         }
     }
 
+    // Flow 1 projection for tracer_provider: emits the IConfiguration keys consumed by the env-var
+    // sampler-options factory. Projects trace_id_ratio_based.ratio at the top level, and also
+    // parent_based -> root -> trace_id_ratio_based -> ratio for the nested case.
+    private static void EmitTracerProviderFlowOne(
+        ConfigProperty<TracerProviderConfiguration> tracerProvider,
+        IDictionary<string, string?> data)
+    {
+        if (!tracerProvider.TryGetValue(out var tpConfig) ||
+            !tpConfig.Sampler.TryGetValue(out var samplerConfig) ||
+            samplerConfig.PluginName.Length == 0)
+        {
+            return;
+        }
+
+        string? ratioStr = null;
+
+        if (string.Equals(samplerConfig.PluginName, "trace_id_ratio_based", StringComparison.Ordinal))
+        {
+            samplerConfig.Properties.TryGetString("ratio", out ratioStr);
+        }
+        else if (string.Equals(samplerConfig.PluginName, "parent_based", StringComparison.Ordinal))
+        {
+            ratioStr = TryGetParentBasedRootRatio(samplerConfig.Properties);
+        }
+
+        // Emit the ratio as a flat IConfiguration key so that the Stream-5 reloadable sampler
+        // (ReloadingTraceIdRatioSampler) can read it from IOptionsMonitor<SamplerOptions>.
+        if (ratioStr != null)
+        {
+            data[DeclarativeSamplerArgKey] = ratioStr;
+        }
+    }
+
+    // Walks parent_based.root SDK extension plugin node to extract a trace_id_ratio_based ratio, if present.
+    // Returns null if root is absent, not trace_id_ratio_based, or has no ratio entry.
+    private static string? TryGetParentBasedRootRatio(IDeclarativeConfigProperties parentBasedProps)
+    {
+        // Root holds an SDK extension plugin node: { "trace_id_ratio_based": { "ratio": "..." } }
+        var rootPluginProperties = parentBasedProps.GetProperties("root");
+        if (rootPluginProperties == null)
+        {
+            return null;
+        }
+
+        var ratioBag = rootPluginProperties.GetProperties("trace_id_ratio_based");
+        if (ratioBag == null)
+        {
+            return null;
+        }
+
+        ratioBag.TryGetString("ratio", out var ratioStr);
+        return ratioStr;
+    }
+
+    // Encode ',' and '=' per spec; '%' first to avoid double-encoding; '+' because UrlDecode maps it to space.
     // Percent-encode attribute values for OTEL_RESOURCE_ATTRIBUTES per the OTel resource spec:
     // https://opentelemetry.io/docs/specs/otel/resource/sdk/#specifying-resource-information-via-an-environment-variable
     // Encoding order: '%' first to prevent double-encoding, then structural chars ',' and '=',

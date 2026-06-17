@@ -16,4 +16,6 @@ internal static class YamlKeys
     internal const string Name = "name";
     internal const string Value = "value";
     internal const string Type = "type";
+    internal const string TracerProvider = "tracer_provider";
+    internal const string Sampler = "sampler";
 }

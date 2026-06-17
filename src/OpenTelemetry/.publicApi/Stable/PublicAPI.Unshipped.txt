@@ -1,0 +1,7 @@
+#nullable enable
+OpenTelemetry.Trace.SamplerOptions
+OpenTelemetry.Trace.SamplerOptions.SamplerOptions() -> void
+OpenTelemetry.Trace.SamplerOptions.SamplerArgument.get -> double?
+OpenTelemetry.Trace.SamplerOptions.SamplerArgument.set -> void
+OpenTelemetry.Trace.SamplerOptions.SamplerType.get -> string?
+OpenTelemetry.Trace.SamplerOptions.SamplerType.set -> void

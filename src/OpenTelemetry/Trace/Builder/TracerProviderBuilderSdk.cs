@@ -39,6 +39,10 @@ internal sealed class TracerProviderBuilderSdk : TracerProviderBuilder, ITracerP
 
     public bool ExceptionProcessorEnabled { get; private set; }
 
+    // Set by DeclarativeComponentBuilder after parsing the declarative config file.
+    // Precedence: Sampler (programmatic) > DeclarativeSampler > env-var > default.
+    internal Sampler? DeclarativeSampler { get; private set; }
+
     public void RegisterProvider(TracerProviderSdk tracerProvider)
     {
         Debug.Assert(tracerProvider != null, "tracerProvider was null");
@@ -163,6 +167,15 @@ internal sealed class TracerProviderBuilderSdk : TracerProviderBuilder, ITracerP
 
     TracerProviderBuilder IDeferredTracerProviderBuilder.Configure(Action<IServiceProvider, TracerProviderBuilder> configure)
         => this.ConfigureBuilder(configure);
+
+    internal TracerProviderBuilderSdk SetDeclarativeSampler(Sampler sampler)
+    {
+        Debug.Assert(sampler != null, "sampler was null");
+
+        this.DeclarativeSampler = sampler;
+
+        return this;
+    }
 
     internal readonly struct InstrumentationRegistration
     {

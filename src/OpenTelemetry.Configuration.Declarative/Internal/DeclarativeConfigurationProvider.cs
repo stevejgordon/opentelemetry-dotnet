@@ -13,39 +13,41 @@ namespace OpenTelemetry.Configuration.Declarative;
 /// An <see cref="IConfigurationProvider"/> that reads OpenTelemetry configuration from a declarative configuration YAML file.
 /// The file is parsed and loaded into the provider's data dictionary.
 /// </summary>
-internal sealed class DeclarativeConfigurationProvider(FilePath filePath) : ConfigurationProvider
+internal sealed class DeclarativeConfigurationProvider(DeclarativeConfigurationModelCache cache) : ConfigurationProvider
 {
-    private readonly string fileDisplayPath = filePath.DisplayPath;
+    private readonly DeclarativeConfigurationModelCache cache = cache;
 
-    internal FilePath FilePath { get; } = filePath;
+    internal FilePath FilePath => this.cache.FilePath;
 
     /// <inheritdoc/>
     public override void Load()
     {
+        var filePath = this.cache.FilePath.DisplayPath;
+
         try
         {
-            var data = DeclarativeConfigurationReader.Read(this.FilePath);
+            var result = this.cache.LoadFromProvider();
 
-            this.Data = data;
+            this.Data = result.FlatKeys;
 
-            OpenTelemetryDeclarativeConfigurationEventSource.Log.ConfigurationLoadSucceeded(this.fileDisplayPath, data.Count);
+            OpenTelemetryDeclarativeConfigurationEventSource.Log.ConfigurationLoadSucceeded(filePath, result.FlatKeys.Count);
 
-            if (data.TryGetValue(DeclarativeConfigurationConverter.DisabledKey, out var disabledValue) &&
+            if (result.FlatKeys.TryGetValue(DeclarativeConfigurationConverter.DisabledKey, out var disabledValue) &&
                 bool.TryParse(disabledValue, out var disabled) && disabled)
             {
-                OpenTelemetryDeclarativeConfigurationEventSource.Log.SdkDisabledDetected(this.fileDisplayPath);
+                OpenTelemetryDeclarativeConfigurationEventSource.Log.SdkDisabledDetected(filePath);
             }
         }
         catch (DeclarativeConfigurationException ex)
         {
-            OpenTelemetryDeclarativeConfigurationEventSource.Log.FailedToLoadConfiguration(this.fileDisplayPath, ex);
+            OpenTelemetryDeclarativeConfigurationEventSource.Log.FailedToLoadConfiguration(filePath, ex);
             throw;
         }
         catch (Exception ex)
         {
-            OpenTelemetryDeclarativeConfigurationEventSource.Log.FailedToLoadConfiguration(this.fileDisplayPath, ex);
+            OpenTelemetryDeclarativeConfigurationEventSource.Log.FailedToLoadConfiguration(filePath, ex);
             throw new DeclarativeConfigurationException(
-                $"Failed to load declarative configuration from '{this.fileDisplayPath}': {ex.Message}", ex);
+                $"Failed to load declarative configuration from '{filePath}': {ex.Message}", ex);
         }
     }
 }

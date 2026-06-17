@@ -91,4 +91,25 @@ internal sealed class OpenTelemetryDeclarativeConfigurationEventSource : EventSo
 
     [Event(23, Message = "Declarative config: configuration file '{0}' is empty; no keys were produced and the SDK will use defaults.", Level = EventLevel.Informational)]
     public void EmptyConfigurationFile(string filePath) => this.WriteEvent(23, filePath);
+
+    [Event(24, Message = "Declarative config: field '{0}' has value '{1}' which cannot be parsed as a double; the setting will be treated as absent.", Level = EventLevel.Warning)]
+    public void InvalidDoubleValue(string fieldName, string actualValue) => this.WriteEvent(24, fieldName, actualValue);
+
+    [NonEvent]
+    public void ComponentBuildFailed(string componentKind, string typeName, Exception ex)
+    {
+        if (this.IsEnabled(EventLevel.Error, EventKeywords.All))
+        {
+            this.ComponentBuildFailed(componentKind, typeName, ex.ToInvariantString());
+        }
+    }
+
+    [Event(25, Message = "Declarative config: failed to build {0} component '{1}': {2}", Level = EventLevel.Error)]
+    public void ComponentBuildFailed(string componentKind, string typeName, string error) => this.WriteEvent(25, componentKind, typeName, error);
+
+    [Event(26, Message = "Declarative config: the configuration model from '{0}' was not available when TracerProvider was built; declarative components (samplers, processors) will not be applied. Ensure IConfiguration is initialized before TracerProvider is first resolved.", Level = EventLevel.Warning)]
+    public void DeclarativeConfigNotLoadedAtBuildTime(string filePath) => this.WriteEvent(26, filePath);
+
+    [Event(27, Message = "Declarative config: '{0}' component will not be applied because the configuration section is malformed. See earlier warnings for details.", Level = EventLevel.Warning)]
+    public void MalformedDeclarativeComponentSkipped(string componentKind) => this.WriteEvent(27, componentKind);
 }

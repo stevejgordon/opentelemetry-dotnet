@@ -31,12 +31,13 @@ internal static class DeclarativeConfigurationReader
         YamlKeys.FileFormat,
         YamlKeys.Disabled,
         YamlKeys.Resource,
+        YamlKeys.TracerProvider,
     };
 #endif
 
     /// <summary>
     /// Opens <paramref name="filePath"/>, validates <c>file_format</c>, parses the typed model,
-    /// and converts it into a <see cref="ReadOnlyDictionary{TKey, TValue}"/> as flat declarative configuration keys.
+    /// and returns both the model and its flat key/value projection.
     /// </summary>
     /// <param name="filePath">The <see cref="FilePath"/> for the YAML file to be read.</param>
     /// <exception cref="DeclarativeConfigurationException">
@@ -48,8 +49,8 @@ internal static class DeclarativeConfigurationReader
     /// Callers that surface this to end users (e.g. <see cref="IConfigurationProvider.Load"/>)
     /// should catch and wrap it as a <see cref="DeclarativeConfigurationException"/>.
     /// </exception>
-    /// <returns>A <see cref="ReadOnlyDictionary{TKey, TValue}"/> containing the flat declarative configuration.</returns>
-    internal static ReadOnlyDictionary<string, string?> Read(FilePath filePath)
+    /// <returns>A <see cref="DeclarativeConfigurationReadResult"/> containing both the typed model and flat keys.</returns>
+    internal static DeclarativeConfigurationReadResult ReadFull(FilePath filePath)
     {
         var data = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 
@@ -63,7 +64,8 @@ internal static class DeclarativeConfigurationReader
         {
             // Empty file is a no-op in overlay mode; informational event for diagnostics.
             OpenTelemetryDeclarativeConfigurationEventSource.Log.EmptyConfigurationFile(filePath.DisplayPath);
-            return new ReadOnlyDictionary<string, string?>(data);
+            var emptyModel = new DeclarativeConfiguration(string.Empty);
+            return new DeclarativeConfigurationReadResult(emptyModel, new ReadOnlyDictionary<string, string?>(data));
         }
 
         if (stream.Documents.Count > 1)
@@ -91,8 +93,13 @@ internal static class DeclarativeConfigurationReader
         // Phase 3: project the typed model into flat keys.
         DeclarativeConfigurationConverter.Convert(config, data);
 
-        return new ReadOnlyDictionary<string, string?>(data);
+        return new DeclarativeConfigurationReadResult(config, new ReadOnlyDictionary<string, string?>(data));
     }
+
+    // Compatibility shim: returns only the flat key/value projection.
+    // Used by tests written before the DeclarativeConfigurationReadResult return type was introduced.
+    internal static ReadOnlyDictionary<string, string?> Read(FilePath filePath)
+        => ReadFull(filePath).FlatKeys;
 
     // Logs each top-level section that this package does not recognise (lenient validation).
     private static void LogUnknownTopLevelSections(YamlMappingNode root)

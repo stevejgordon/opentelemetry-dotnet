@@ -25,4 +25,9 @@ internal sealed record DeclarativeConfiguration(string FileFormat)
     /// Gets the <c>resource</c> section.
     /// </summary>
     public ConfigProperty<ResourceConfiguration> Resource { get; init; }
+
+    /// <summary>
+    /// Gets the <c>tracer_provider</c> section.
+    /// </summary>
+    public ConfigProperty<TracerProviderConfiguration> TracerProvider { get; init; }
 }

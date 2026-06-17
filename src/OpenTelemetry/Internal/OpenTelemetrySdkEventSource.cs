@@ -321,9 +321,9 @@ internal sealed class OpenTelemetrySdkEventSource : EventSource, IConfigurationE
     public void MetricViewException(string source, string ex)
         => this.WriteEvent(56, source, ex);
 
-    [Event(57, Message = "Exception thrown by user-supplied ExemplarReservoir.Offer implementation: '{0}'.", Level = EventLevel.Verbose)]
-    public void ExemplarReservoirException(string ex)
-        => this.WriteEvent(57, ex);
+    [Event(57, Message = "Declarative config: trace_id_ratio_based sampler ratio '{0}' is invalid or out of range [0, 1]; using default value of 1.0.", Level = EventLevel.Warning)]
+    public void TraceIdRatioBasedSamplerRatioInvalid(string configValue)
+        => this.WriteEvent(57, configValue);
 
     void IConfigurationExtensionsLogger.LogInvalidConfigurationValue(string key, string value)
         => this.InvalidConfigurationValue(key, value);

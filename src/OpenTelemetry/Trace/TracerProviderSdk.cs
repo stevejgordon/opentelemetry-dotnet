@@ -1,13 +1,14 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#pragma warning disable OTEL1007 // IDeclarativeConfigProperties is experimental; used internally for env-var adapter
+
 using System.Diagnostics;
-using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using OpenTelemetry.Internal;
 using OpenTelemetry.Resources;
 
@@ -17,6 +18,14 @@ internal sealed class TracerProviderSdk : TracerProvider
 {
     internal const string TracesSamplerConfigKey = "OTEL_TRACES_SAMPLER";
     internal const string TracesSamplerArgConfigKey = "OTEL_TRACES_SAMPLER_ARG";
+
+    // OTEL_TRACES_SAMPLER environment variable values (spec-defined, case-insensitive).
+    internal const string SamplerEnvVarAlwaysOn = "always_on";
+    internal const string SamplerEnvVarAlwaysOff = "always_off";
+    internal const string SamplerEnvVarTraceIdRatio = "traceidratio";
+    internal const string SamplerEnvVarParentBasedAlwaysOn = "parentbased_always_on";
+    internal const string SamplerEnvVarParentBasedAlwaysOff = "parentbased_always_off";
+    internal const string SamplerEnvVarParentBasedTraceIdRatio = "parentbased_traceidratio";
 
     internal readonly IServiceProvider ServiceProvider;
     internal IDisposable? OwnedServiceProvider;
@@ -59,7 +68,12 @@ internal sealed class TracerProviderSdk : TracerProvider
         resourceBuilder.ServiceProvider = serviceProvider;
         this.Resource = resourceBuilder.Build();
 
-        this.Sampler = GetSampler(serviceProvider!.GetRequiredService<IConfiguration>(), state.Sampler);
+        this.Sampler = GetSampler(
+            serviceProvider!.GetRequiredService<IOptions<SamplerOptions>>().Value,
+            state.Sampler,
+            state.DeclarativeSampler,
+            serviceProvider!.GetService<PluginComponentProviderRegistry>(),
+            serviceProvider!);
         OpenTelemetrySdkEventSource.Log.TracerProviderSdkEvent($"Sampler added = \"{this.Sampler.GetType()}\".");
 
         this.supportLegacyActivity = state.LegacyActivityOperationNames.Count > 0;
@@ -386,53 +400,54 @@ internal sealed class TracerProviderSdk : TracerProvider
         base.Dispose(disposing);
     }
 
-    private static Sampler GetSampler(IConfiguration configuration, Sampler? stateSampler)
+    // Precedence: programmatic (programmaticSampler) > declarative (declarativeSampler) > env-var (options) > default.
+    private static Sampler GetSampler(
+        SamplerOptions options,
+        Sampler? programmaticSampler,
+        Sampler? declarativeSampler,
+        PluginComponentProviderRegistry? registry,
+        IServiceProvider serviceProvider)
     {
-        var sampler = stateSampler;
-
-        if (configuration.TryGetStringValue(TracesSamplerConfigKey, out var configValue))
+        if (programmaticSampler != null)
         {
-            if (sampler != null)
+            var envSamplerType = options.SamplerType;
+            if (!string.IsNullOrWhiteSpace(envSamplerType))
             {
                 OpenTelemetrySdkEventSource.Log.TracerProviderSdkEvent(
-                    $"Trace sampler configuration value '{configValue}' has been ignored because a value '{sampler.GetType().FullName}' was set programmatically.");
-                return sampler;
+                    $"Trace sampler configuration value '{envSamplerType}' has been ignored because a value '{programmaticSampler.GetType().FullName}' was set programmatically.");
             }
 
-            switch (configValue)
+            if (declarativeSampler != null)
             {
-                case var _ when string.Equals(configValue, "always_on", StringComparison.OrdinalIgnoreCase):
-                    sampler = AlwaysOnSampler.Instance;
-                    break;
-                case var _ when string.Equals(configValue, "always_off", StringComparison.OrdinalIgnoreCase):
-                    sampler = AlwaysOffSampler.Instance;
-                    break;
-                case var _ when string.Equals(configValue, "traceidratio", StringComparison.OrdinalIgnoreCase):
-                    {
-                        var traceIdRatio = ReadTraceIdRatio(configuration);
-                        sampler = new TraceIdRatioBasedSampler(traceIdRatio);
-                        break;
-                    }
-
-                case var _ when string.Equals(configValue, "parentbased_always_on", StringComparison.OrdinalIgnoreCase):
-                    sampler = new ParentBasedSampler(AlwaysOnSampler.Instance);
-                    break;
-                case var _ when string.Equals(configValue, "parentbased_always_off", StringComparison.OrdinalIgnoreCase):
-                    sampler = new ParentBasedSampler(AlwaysOffSampler.Instance);
-                    break;
-                case var _ when string.Equals(configValue, "parentbased_traceidratio", StringComparison.OrdinalIgnoreCase):
-                    {
-                        var traceIdRatio = ReadTraceIdRatio(configuration);
-                        sampler = new ParentBasedSampler(new TraceIdRatioBasedSampler(traceIdRatio));
-                        break;
-                    }
-
-                default:
-                    OpenTelemetrySdkEventSource.Log.TracesSamplerConfigInvalid(configValue);
-                    break;
+                OpenTelemetrySdkEventSource.Log.TracerProviderSdkEvent(
+                    $"Declarative trace sampler '{declarativeSampler.GetType().FullName}' has been ignored because a value '{programmaticSampler.GetType().FullName}' was set programmatically.");
             }
 
-            if (sampler != null)
+            return programmaticSampler;
+        }
+
+        if (declarativeSampler != null)
+        {
+            var envSamplerType = options.SamplerType;
+            if (!string.IsNullOrWhiteSpace(envSamplerType))
+            {
+                OpenTelemetrySdkEventSource.Log.TracerProviderSdkEvent(
+                    $"Trace sampler configuration value '{envSamplerType}' has been ignored because a declarative sampler '{declarativeSampler.GetType().FullName}' was configured.");
+            }
+
+            return declarativeSampler;
+        }
+
+        Sampler? sampler = null;
+        var samplerType = options.SamplerType;
+        if (!string.IsNullOrWhiteSpace(samplerType))
+        {
+            sampler = CreateSamplerFromEnvVar(samplerType!, options, registry, serviceProvider);
+            if (sampler == null)
+            {
+                OpenTelemetrySdkEventSource.Log.TracesSamplerConfigInvalid(samplerType!);
+            }
+            else
             {
                 OpenTelemetrySdkEventSource.Log.TracerProviderSdkEvent($"Trace sampler set to '{sampler.GetType().FullName}' from configuration.");
             }
@@ -441,23 +456,97 @@ internal sealed class TracerProviderSdk : TracerProvider
         return sampler ?? new ParentBasedSampler(AlwaysOnSampler.Instance);
     }
 
-    private static double ReadTraceIdRatio(IConfiguration configuration)
+    private static double GetSamplerArgument(SamplerOptions options)
     {
-        if (configuration.TryGetStringValue(TracesSamplerArgConfigKey, out var configValue) &&
-                double.TryParse(configValue, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var traceIdRatio) &&
-                !double.IsNaN(traceIdRatio) &&
-                !double.IsInfinity(traceIdRatio) &&
-                traceIdRatio >= 0.0 &&
-                traceIdRatio <= 1.0)
+        var ratio = options.SamplerArgument;
+        if (ratio.HasValue && !double.IsNaN(ratio.Value) && !double.IsInfinity(ratio.Value)
+            && ratio.Value >= 0.0 && ratio.Value <= 1.0)
         {
-            return traceIdRatio;
+            return ratio.Value;
+        }
+
+        // Log with the raw string when available; fall back to the numeric value so programmatic
+        // out-of-range assignments (e.g. Configure<SamplerOptions>(o => o.SamplerArgument = 2.0)) still
+        // produce a useful diagnostic rather than an empty string.
+        var logValue = options.SamplerArgumentRaw
+            ?? ratio?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            ?? string.Empty;
+        OpenTelemetrySdkEventSource.Log.TracesSamplerArgConfigInvalid(logValue);
+        return 1.0;
+    }
+
+    // Maps the closed OTEL_TRACES_SAMPLER vocabulary (case-insensitive env-var names) to schema
+    // names and property bags, then dispatches through the PluginComponentProviderRegistry. This keeps
+    // the env-var path and the declarative-YAML path sharing the same factory implementations.
+    private static Sampler? CreateSamplerFromEnvVar(
+        string samplerType,
+        SamplerOptions options,
+        PluginComponentProviderRegistry? registry,
+        IServiceProvider serviceProvider)
+    {
+        if (registry == null)
+        {
+            return null;
+        }
+
+        string schemaName;
+        IDeclarativeConfigProperties bag;
+
+        if (string.Equals(samplerType, SamplerEnvVarAlwaysOn, StringComparison.OrdinalIgnoreCase))
+        {
+            schemaName = AlwaysOnSamplerFactory.SchemaName;
+            bag = EmptyDeclarativeConfigProperties.Instance;
+        }
+        else if (string.Equals(samplerType, SamplerEnvVarAlwaysOff, StringComparison.OrdinalIgnoreCase))
+        {
+            schemaName = AlwaysOffSamplerFactory.SchemaName;
+            bag = EmptyDeclarativeConfigProperties.Instance;
+        }
+        else if (string.Equals(samplerType, SamplerEnvVarTraceIdRatio, StringComparison.OrdinalIgnoreCase))
+        {
+            var ratio = GetSamplerArgument(options); // validates range, logs if invalid
+            schemaName = TraceIdRatioBasedSamplerFactory.SchemaName;
+            bag = SimpleDeclarativeConfigProperties.WithStringEntry(
+                "ratio", ratio.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        else if (string.Equals(samplerType, SamplerEnvVarParentBasedAlwaysOn, StringComparison.OrdinalIgnoreCase))
+        {
+            schemaName = ParentBasedSamplerFactory.SchemaName;
+            bag = BuildParentBasedBag(AlwaysOnSamplerFactory.SchemaName, null);
+        }
+        else if (string.Equals(samplerType, SamplerEnvVarParentBasedAlwaysOff, StringComparison.OrdinalIgnoreCase))
+        {
+            schemaName = ParentBasedSamplerFactory.SchemaName;
+            bag = BuildParentBasedBag(AlwaysOffSamplerFactory.SchemaName, null);
+        }
+        else if (string.Equals(samplerType, SamplerEnvVarParentBasedTraceIdRatio, StringComparison.OrdinalIgnoreCase))
+        {
+            var ratio = GetSamplerArgument(options); // validates range, logs if invalid
+            schemaName = ParentBasedSamplerFactory.SchemaName;
+            bag = BuildParentBasedBag(
+                TraceIdRatioBasedSamplerFactory.SchemaName,
+                ratio.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
         else
         {
-            OpenTelemetrySdkEventSource.Log.TracesSamplerArgConfigInvalid(configValue ?? string.Empty);
+            return null; // unknown sampler type
         }
 
-        return 1.0;
+        return registry.TryCreate<Sampler>(schemaName, bag, serviceProvider, out var sampler)
+            ? sampler
+            : null;
+    }
+
+    // Builds the bag that parent_based expects: { "root": { rootSchemaName: innerBag } }.
+    // When ratioRaw is null the inner bag is empty (factory uses default 1.0).
+    private static IDeclarativeConfigProperties BuildParentBasedBag(string rootSchemaName, string? ratioRaw)
+    {
+        IDeclarativeConfigProperties innerBag = ratioRaw != null
+            ? SimpleDeclarativeConfigProperties.WithStringEntry("ratio", ratioRaw)
+            : EmptyDeclarativeConfigProperties.Instance;
+
+        var rootPluginProperties = SimpleDeclarativeConfigProperties.WithNestedBag(rootSchemaName, innerBag);
+        return SimpleDeclarativeConfigProperties.WithNestedBag("root", rootPluginProperties);
     }
 
     private static ActivitySamplingResult ComputeActivitySamplingResult(

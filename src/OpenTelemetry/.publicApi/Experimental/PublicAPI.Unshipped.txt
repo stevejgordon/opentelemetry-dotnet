@@ -1,3 +1,26 @@
+[OTEL1007]abstract OpenTelemetry.PluginComponentProvider<TComponent>.CreateComponent(OpenTelemetry.IDeclarativeConfigProperties! properties, System.IServiceProvider! serviceProvider) -> TComponent!
+[OTEL1007]abstract OpenTelemetry.PluginComponentProvider<TComponent>.Name.get -> string!
+[OTEL1007]Microsoft.Extensions.DependencyInjection.ComponentRegistrationExtensions
+[OTEL1007]OpenTelemetry.PluginComponentProvider<TComponent>
+[OTEL1007]OpenTelemetry.PluginComponentProvider<TComponent>.PluginComponentProvider() -> void
+[OTEL1007]OpenTelemetry.IDeclarativeConfigProperties
+[OTEL1007]OpenTelemetry.IDeclarativeConfigProperties.GetKeys() -> System.Collections.Generic.IEnumerable<string!>!
+[OTEL1007]OpenTelemetry.IDeclarativeConfigProperties.GetProperties(string! key) -> OpenTelemetry.IDeclarativeConfigProperties?
+[OTEL1007]OpenTelemetry.IDeclarativeConfigProperties.GetPropertiesList(string! key) -> System.Collections.Generic.IReadOnlyList<OpenTelemetry.IDeclarativeConfigProperties!>?
+[OTEL1007]OpenTelemetry.IDeclarativeConfigProperties.TryGetBool(string! key, out bool? value) -> bool
+[OTEL1007]OpenTelemetry.IDeclarativeConfigProperties.TryGetDouble(string! key, out double? value) -> bool
+[OTEL1007]OpenTelemetry.IDeclarativeConfigProperties.TryGetInt(string! key, out int? value) -> bool
+[OTEL1007]OpenTelemetry.IDeclarativeConfigProperties.TryGetLong(string! key, out long? value) -> bool
+[OTEL1007]OpenTelemetry.IDeclarativeConfigProperties.TryGetString(string! key, out string? value) -> bool
+[OTEL1007]OpenTelemetry.Trace.SamplerPluginProvider
+[OTEL1007]OpenTelemetry.Trace.SamplerPluginProvider.SamplerPluginProvider() -> void
+[OTEL1007]OpenTelemetry.Trace.SpanExporterPluginProvider
+[OTEL1007]OpenTelemetry.Trace.SpanExporterPluginProvider.SpanExporterPluginProvider() -> void
+[OTEL1007]OpenTelemetry.Trace.SpanProcessorPluginProvider
+[OTEL1007]OpenTelemetry.Trace.SpanProcessorPluginProvider.SpanProcessorPluginProvider() -> void
+[OTEL1007]static Microsoft.Extensions.DependencyInjection.ComponentRegistrationExtensions.AddSamplerPluginProvider(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, OpenTelemetry.Trace.SamplerPluginProvider! provider) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+[OTEL1007]static Microsoft.Extensions.DependencyInjection.ComponentRegistrationExtensions.AddSpanExporterPluginProvider(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, OpenTelemetry.Trace.SpanExporterPluginProvider! provider) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+[OTEL1007]static Microsoft.Extensions.DependencyInjection.ComponentRegistrationExtensions.AddSpanProcessorPluginProvider(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, OpenTelemetry.Trace.SpanProcessorPluginProvider! provider) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 [OTEL1004]abstract OpenTelemetry.Metrics.ExemplarReservoir.Collect() -> OpenTelemetry.Metrics.ReadOnlyExemplarCollection
 [OTEL1004]abstract OpenTelemetry.Metrics.ExemplarReservoir.Offer(in OpenTelemetry.Metrics.ExemplarMeasurement<double> measurement) -> void
 [OTEL1004]abstract OpenTelemetry.Metrics.ExemplarReservoir.Offer(in OpenTelemetry.Metrics.ExemplarMeasurement<long> measurement) -> void
