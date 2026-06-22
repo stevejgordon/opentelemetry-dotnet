@@ -12,9 +12,11 @@ namespace OpenTelemetry.Trace;
 /// <para>
 /// Values are sourced from <c>OTEL_TRACES_SAMPLER</c> and
 /// <c>OTEL_TRACES_SAMPLER_ARG</c> by default. Named options prefixed with
-/// <c>declarative:</c> read from the corresponding
-/// <see cref="Microsoft.Extensions.Configuration.IConfiguration"/> subsection
-/// projected from the declarative configuration file.
+/// <c>opentelemetry:</c> read from the canonical
+/// <c>opentelemetry:traces:sampler:arg</c> key in
+/// <see cref="Microsoft.Extensions.Configuration.IConfiguration"/>, which any
+/// reload-capable source (declarative YAML, telemetry policy provider, etc.)
+/// can write to in order to drive a runtime ratio update.
 /// </para>
 /// <para>
 /// Use <c>services.Configure&lt;SamplerOptions&gt;</c> for programmatic

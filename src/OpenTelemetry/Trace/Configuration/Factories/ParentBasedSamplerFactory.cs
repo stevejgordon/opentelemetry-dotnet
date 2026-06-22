@@ -17,15 +17,38 @@ internal sealed class ParentBasedSamplerFactory : SamplerPluginProvider
     {
         var registry = serviceProvider.GetRequiredService<PluginComponentProviderRegistry>();
 
-        var root = CreateDelegateSampler("root", properties, registry, serviceProvider) ?? throw new InvalidOperationException(
-                "parent_based sampler requires a 'root' delegate sampler but none was specified in the declarative configuration.");
+        Sampler? root = null, remoteParentSampled = null, remoteParentNotSampled = null,
+            localParentSampled = null, localParentNotSampled = null;
+        try
+        {
+            root = CreateDelegateSampler("root", properties, registry, serviceProvider) ?? throw new InvalidOperationException(
+                    "parent_based sampler requires a 'root' delegate sampler but none was specified in the declarative configuration.");
 
-        var remoteParentSampled = CreateDelegateSampler("remote_parent_sampled", properties, registry, serviceProvider);
-        var remoteParentNotSampled = CreateDelegateSampler("remote_parent_not_sampled", properties, registry, serviceProvider);
-        var localParentSampled = CreateDelegateSampler("local_parent_sampled", properties, registry, serviceProvider);
-        var localParentNotSampled = CreateDelegateSampler("local_parent_not_sampled", properties, registry, serviceProvider);
+            remoteParentSampled = CreateDelegateSampler("remote_parent_sampled", properties, registry, serviceProvider);
+            remoteParentNotSampled = CreateDelegateSampler("remote_parent_not_sampled", properties, registry, serviceProvider);
+            localParentSampled = CreateDelegateSampler("local_parent_sampled", properties, registry, serviceProvider);
+            localParentNotSampled = CreateDelegateSampler("local_parent_not_sampled", properties, registry, serviceProvider);
 
-        return new ParentBasedSampler(root, remoteParentSampled, remoteParentNotSampled, localParentSampled, localParentNotSampled);
+            // DisposingParentBasedSampler wraps the inner sampler and disposes the constructed
+            // child samplers (e.g. ReloadingTraceIdRatioSampler) when the tracer provider shuts down.
+            // TracerProviderSdk only disposes the top-level sampler, so this wrapper ensures that
+            // IOptionsMonitor subscriptions held by nested samplers are always torn down.
+            var inner = new ParentBasedSampler(root, remoteParentSampled, remoteParentNotSampled, localParentSampled, localParentNotSampled);
+            return new DisposingParentBasedSampler(inner, [root, remoteParentSampled, remoteParentNotSampled, localParentSampled, localParentNotSampled]);
+        }
+        catch
+        {
+            // CA1508 false positive: these variables are Sampler? and may be null if the
+            // exception was thrown before their assignments in the try block.
+#pragma warning disable CA1508
+            (root as IDisposable)?.Dispose();
+            (remoteParentSampled as IDisposable)?.Dispose();
+            (remoteParentNotSampled as IDisposable)?.Dispose();
+            (localParentSampled as IDisposable)?.Dispose();
+            (localParentNotSampled as IDisposable)?.Dispose();
+#pragma warning restore CA1508
+            throw;
+        }
     }
 
     // Each delegate key holds an SDK extension plugin node: a single-entry map whose key is the sampler

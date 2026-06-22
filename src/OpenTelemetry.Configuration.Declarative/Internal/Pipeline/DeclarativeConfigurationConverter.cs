@@ -26,11 +26,10 @@ internal static partial class DeclarativeConfigurationConverter
     internal const string DisabledKey = OtelEnvironmentVariables.SdkDisabled;
     internal const string ResourceAttributesKey = OtelEnvironmentVariables.ResourceAttributes;
 
-    // IConfiguration key for the projected trace_id_ratio_based ratio (Flow 1).
-    // Defined in ProviderBuilderServiceCollectionExtensions (core); aliased here so the converter
-    // does not embed a duplicate string literal that could silently drift out of sync.
-    internal const string DeclarativeSamplerArgKey =
-        Microsoft.Extensions.DependencyInjection.ProviderBuilderServiceCollectionExtensions.DeclarativeSamplerArgKey;
+    // Canonical IConfiguration key for the sampler ratio. Aliased from core so this converter
+    // never embeds a duplicate string literal that could silently drift out of sync.
+    internal const string SamplerArgConfigKey =
+        Microsoft.Extensions.DependencyInjection.ProviderBuilderServiceCollectionExtensions.SamplerArgConfigKey;
 
     // Per OTel attribute naming spec: starts with a letter or underscore,
     // followed by letters, digits, underscores, hyphens, or dots.
@@ -254,11 +253,11 @@ internal static partial class DeclarativeConfigurationConverter
             ratioStr = TryGetParentBasedRootRatio(samplerConfig.Properties);
         }
 
-        // Emit the ratio as a flat IConfiguration key so that the Stream-5 reloadable sampler
-        // (ReloadingTraceIdRatioSampler) can read it from IOptionsMonitor<SamplerOptions>.
+        // Emit the ratio under the canonical reload contract key so that
+        // ReloadingTraceIdRatioSampler picks it up via IOptionsMonitor<SamplerOptions>.
         if (ratioStr != null)
         {
-            data[DeclarativeSamplerArgKey] = ratioStr;
+            data[SamplerArgConfigKey] = ratioStr;
         }
     }
 
