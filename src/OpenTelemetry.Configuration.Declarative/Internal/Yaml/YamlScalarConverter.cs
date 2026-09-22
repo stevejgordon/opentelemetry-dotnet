@@ -58,8 +58,7 @@ internal static class YamlScalarConverter
         };
 
     // !!float accepts integer notation, so hex and octal values can arrive with Float kind.
-    // Accumulate directly into double so values beyond the long range saturate to +Infinity
-    // naturally rather than becoming unrepresentable integers.
+    // Round hex and octal integers once, including values beyond the long range.
     private static ConfigValue ConvertFloat(string value) =>
         value switch
         {
@@ -73,21 +72,28 @@ internal static class YamlScalarConverter
             _ => ConvertDecimalFloat(value),
         };
 
-    // Before .NET Core 3.0, double.TryParse fails instead of saturating to +/-Infinity on overflow,
-    // and does not preserve negative zero. The extra arms keep behavior consistent across TFMs.
-    private static ConfigValue ConvertDecimalFloat(string value) =>
-        double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) switch
+    private static ConfigValue ConvertDecimalFloat(string value)
+    {
+#if !NET9_0_OR_GREATER
+        // .NET Framework and .NET 8 can misround decimal boundaries even when parsing succeeds,
+        // and give up entirely on digit strings longer than their internal buffer. IsDecimalNumber
+        // rather than IsFloat: the parser takes decimal digits only, so it must not be handed the
+        // .inf/.nan or hex/octal forms the arms above have already dealt with.
+        if (YamlScalarResolver.IsDecimalNumber(value))
         {
-#if !NET
-            true when d == 0.0 && IsNegative(value) && BitConverter.DoubleToInt64Bits(d) >= 0 =>
-                ConfigValue.Double(-d),
+            return ConfigValue.Double(DecimalFloatParser.Parse(value));
+        }
 #endif
+
+        return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) switch
+        {
             true => ConfigValue.Double(d),
 
-            // Overflow on those frameworks, or text that is not a float at all.
+            // Preserve the fallback for malformed, hand-built Float-kind scalars.
             false when IsNegative(value) => ConfigValue.Double(double.NegativeInfinity),
             false => ConfigValue.Double(double.PositiveInfinity),
         };
+    }
 
     private static bool IsNegative(string value) =>
         value is { Length: > 0 } && value[0] == '-';
@@ -113,13 +119,49 @@ internal static class YamlScalarConverter
 
     private static double AccumulateDouble(string value, int start, ulong numberBase)
     {
-        var accumulator = 0.0;
+        var bitsPerDigit = numberBase == 16 ? 4 : 3;
+        var significand = 0UL;
+        var exponent = 0;
+        var hasDiscardedNonzeroBits = false;
+
         for (var i = start; i < value.Length; i++)
         {
-            accumulator = (accumulator * numberBase) + DigitValue(value[i], numberBase);
+            var digit = DigitValue(value[i], numberBase);
+            if (exponent == 0)
+            {
+                significand = (significand << bitsPerDigit) | digit;
+
+                // Retain 53 significant bits plus a guard bit; all lower bits contribute
+                // to the sticky bit so a distant nonzero digit can break a rounding tie.
+                while (significand >= (1UL << 54))
+                {
+                    hasDiscardedNonzeroBits |= (significand & 1) != 0;
+                    significand >>= 1;
+                    exponent++;
+                }
+            }
+            else
+            {
+                hasDiscardedNonzeroBits |= digit != 0;
+
+                // A 53-bit significand scaled by 2^972 always overflows double.
+                exponent = Math.Min(972, exponent + bitsPerDigit);
+            }
         }
 
-        return accumulator;
+        if (significand < (1UL << 53))
+        {
+            return significand;
+        }
+
+        var roundUp = (significand & 1) != 0
+            && (hasDiscardedNonzeroBits || (significand & 2) != 0);
+        significand = (significand >> 1) + (roundUp ? 1UL : 0UL);
+        exponent++;
+
+        return exponent > 971
+            ? double.PositiveInfinity
+            : significand * Math.Pow(2, exponent);
     }
 
     private static ulong DigitValue(char c, ulong numberBase)

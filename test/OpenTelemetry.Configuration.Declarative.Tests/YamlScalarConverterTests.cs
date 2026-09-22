@@ -1,6 +1,8 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Globalization;
+using System.Numerics;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
@@ -8,6 +10,74 @@ namespace OpenTelemetry.Configuration.Declarative.Tests;
 
 public sealed class YamlScalarConverterTests
 {
+    public static TheoryData<string, long> DecimalFloatRoundingCases
+    {
+        get
+        {
+            const string midpoint = "1.00000000000000011102230246251565404236316680908203125";
+            var halfSubnormal = BigInteger.Pow(5, 1075);
+            var normalBoundary = ((BigInteger.One << 53) - 1) * halfSubnormal;
+            var overflowBoundary = ((BigInteger.One << 54) - 1) << 970;
+            var cases = new TheoryData<string, long>
+            {
+                { "9223372036854775296", 0x43e0000000000000 },
+                { "9223372036854775297", 0x43e0000000000000 },
+                { "974089115738272494858974300014068548670211", 0x48a65d2e674ce751 },
+                { midpoint, 0x3ff0000000000000 },
+                { midpoint + new string('0', 1000) + "1", 0x3ff0000000000001 },
+                { "1.00000000000000011102230246251565404236316680908203126", 0x3ff0000000000001 },
+                { "1.00000000000000033306690738754696212708950042724609375", 0x3ff0000000000002 },
+                { "2.4703282292062327e-324", 0 },
+                { "2.4703282292062328e-324", 1 },
+                { "2.2250738585072012e-308", 0x0010000000000000 },
+                { "1.7976931348623157e308", 0x7fefffffffffffff },
+                { "1.7976931348623158e308", 0x7fefffffffffffff },
+                { "1.7976931348623159e308", 0x7ff0000000000000 },
+                { "0", 0 },
+                { "0.0", 0 },
+                { "0e99999999999999999999999999", 0 },
+                { "1e99999999999999999999999999", 0x7ff0000000000000 },
+                { "1e-99999999999999999999999999", 0 },
+                { "1" + new string('0', 5000) + "e-5000", 0x3ff0000000000000 },
+                { "0." + new string('0', 5000) + "1e5001", 0x3ff0000000000000 },
+                { halfSubnormal.ToString(CultureInfo.InvariantCulture) + "e-1075", 0 },
+                { (halfSubnormal - 1).ToString(CultureInfo.InvariantCulture) + "e-1075", 0 },
+                { (halfSubnormal + 1).ToString(CultureInfo.InvariantCulture) + "e-1075", 1 },
+                { halfSubnormal.ToString(CultureInfo.InvariantCulture) + new string('0', 1000) + "1e-2076", 1 },
+                { (halfSubnormal * 3).ToString(CultureInfo.InvariantCulture) + "e-1075", 2 },
+                { normalBoundary.ToString(CultureInfo.InvariantCulture) + "e-1075", 0x0010000000000000 },
+                { (normalBoundary - 1).ToString(CultureInfo.InvariantCulture) + "e-1075", 0x000fffffffffffff },
+                { (normalBoundary + 1).ToString(CultureInfo.InvariantCulture) + "e-1075", 0x0010000000000000 },
+                { overflowBoundary.ToString(CultureInfo.InvariantCulture), 0x7ff0000000000000 },
+                { (overflowBoundary - 1).ToString(CultureInfo.InvariantCulture), 0x7fefffffffffffff },
+                { (overflowBoundary + 1).ToString(CultureInfo.InvariantCulture), 0x7ff0000000000000 },
+            };
+
+            var signedCases = new TheoryData<string, long>();
+            foreach (var row in cases)
+            {
+                var value = (string)row[0];
+                var bits = (long)row[1];
+                signedCases.Add(value, bits);
+                signedCases.Add("-" + value, bits | long.MinValue);
+            }
+
+            return signedCases;
+        }
+    }
+
+    public static TheoryData<string, double> FloatIntegerOverflowBoundaries => new()
+    {
+        { "0x" + new string('f', 13) + "8" + new string('0', 242), double.MaxValue },
+        { "0x" + new string('f', 13) + "b" + new string('f', 242), double.MaxValue },
+        { "0x" + new string('f', 13) + "c" + new string('0', 242), double.PositiveInfinity },
+        { "0x1" + new string('0', 256), double.PositiveInfinity },
+        { "0o1" + new string('7', 17) + "4" + new string('0', 323), double.MaxValue },
+        { "0o1" + new string('7', 17) + "5" + new string('7', 323), double.MaxValue },
+        { "0o1" + new string('7', 17) + "6" + new string('0', 323), double.PositiveInfinity },
+        { "0o2" + new string('0', 341), double.PositiveInfinity },
+    };
+
     [Theory]
     [InlineData("")]
     [InlineData("~")]
@@ -156,6 +226,15 @@ public sealed class YamlScalarConverterTests
         Assert.Equal(expected, result.AsDouble());
     }
 
+    [Theory]
+    [MemberData(nameof(DecimalFloatRoundingCases))]
+    public void Convert_Float_DecimalRounding_IsExact(string value, long expectedBits)
+    {
+        var result = YamlScalarConverter.Convert(new(value, YamlScalarKind.Float));
+
+        Assert.Equal(expectedBits, BitConverter.DoubleToInt64Bits(result.AsDouble()));
+    }
+
     [Fact]
     public void Convert_Float_NegativeUnderflow_ReturnsNegativeZero()
     {
@@ -187,6 +266,56 @@ public sealed class YamlScalarConverterTests
         var result = YamlScalarConverter.Convert(new(value, YamlScalarKind.Float));
 
         Assert.Equal(ConfigValueKind.Double, result.Kind);
+        Assert.Equal(expected, result.AsDouble());
+    }
+
+    [Theory]
+    [InlineData("0x0", 0.0)]
+    [InlineData("0o0", 0.0)]
+    [InlineData("0x000200000000000011", 144115188075855904.0)]
+    [InlineData("0o00010000000000000000021", 144115188075855904.0)]
+    [InlineData("0x1fffffffffffff", 9007199254740991.0)]
+    [InlineData("0o377777777777777777", 9007199254740991.0)]
+    [InlineData("0x20000000000000", 9007199254740992.0)]
+    [InlineData("0o400000000000000000", 9007199254740992.0)]
+    [InlineData("0x20000000000001", 9007199254740992.0)]
+    [InlineData("0o400000000000000001", 9007199254740992.0)]
+    [InlineData("0x20000000000003", 9007199254740996.0)]
+    [InlineData("0o400000000000000003", 9007199254740996.0)]
+    [InlineData("0x200000000000011", 144115188075855904.0)]
+    [InlineData("0o10000000000000000021", 144115188075855904.0)]
+    [InlineData("0x20000000000002f", 144115188075855904.0)]
+    [InlineData("0o10000000000000000057", 144115188075855904.0)]
+    [InlineData("0x20000000000001100", 36893488147419111424.0)]
+    [InlineData("0o4000000000000000010400", 36893488147419111424.0)]
+    [InlineData("0x3fffffffffffff", 18014398509481984.0)]
+    [InlineData("0o777777777777777777", 18014398509481984.0)]
+    public void Convert_Float_IntegerNotation_RoundsToNearestEven(string value, double expected)
+    {
+        var result = YamlScalarConverter.Convert(new(value, YamlScalarKind.Float));
+
+        Assert.Equal(expected, result.AsDouble());
+    }
+
+    [Theory]
+    [InlineData("0x20000000000001", 4)]
+    [InlineData("0o400000000000000001", 3)]
+    public void Convert_Float_IntegerNotation_DistantNonzeroDigitRoundsAboveTie(string prefix, int bitsPerDigit)
+    {
+        var value = prefix + new string('0', 100) + "1";
+        var expected = 9007199254740994.0 * Math.Pow(2, 101 * bitsPerDigit);
+
+        var result = YamlScalarConverter.Convert(new(value, YamlScalarKind.Float));
+
+        Assert.Equal(expected, result.AsDouble());
+    }
+
+    [Theory]
+    [MemberData(nameof(FloatIntegerOverflowBoundaries))]
+    public void Convert_Float_IntegerNotation_OverflowBoundaries(string value, double expected)
+    {
+        var result = YamlScalarConverter.Convert(new(value, YamlScalarKind.Float));
+
         Assert.Equal(expected, result.AsDouble());
     }
 

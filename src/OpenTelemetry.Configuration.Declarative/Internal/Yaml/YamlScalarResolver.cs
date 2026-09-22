@@ -142,13 +142,21 @@ internal static class YamlScalarResolver
     internal static bool IsNaN(string value) =>
         value is ".nan" or ".NaN" or ".NAN";
 
-    internal static bool IsFloat(string value)
-    {
-        if (IsInfinity(value) || IsNaN(value))
-        {
-            return true;
-        }
+    internal static bool IsFloat(string value) =>
+        IsInfinity(value) || IsNaN(value) || IsDecimalFloat(value);
 
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="value"/> is a YAML 1.2 core-schema
+    /// number written in decimal notation, and is therefore a digit string a decimal parser can
+    /// consume.
+    /// </summary>
+    /// <param name="value">The scalar value to test.</param>
+    /// <returns><see langword="true"/> for a decimal integer or decimal float.</returns>
+    internal static bool IsDecimalNumber(string value) =>
+        IsDecimalInteger(value) || IsDecimalFloat(value);
+
+    private static bool IsDecimalFloat(string value)
+    {
         var i = HasSign(value) ? 1 : 0;
         if (i == value.Length)
         {
